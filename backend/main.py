@@ -5,6 +5,9 @@ import models
 from database import SessionLocal, engine
 import schemas
 from pydantic import BaseModel
+import random
+from datetime import datetime, timezone
+import random
 
 # Garante que as tabelas existam (útil caso o arquivo .db seja deletado acidentalmente)
 models.Base.metadata.create_all(bind=engine)
@@ -21,7 +24,8 @@ ESTADO_MEMORIA = {
 }
 
 # Molde simples para receber o ID de quem quer entrar na fila
-class FilaEntrarRequest(BaseModel):
+
+class FilaAcaoRequest(BaseModel):
     jogador_id: str
 
 # --- Adicione estas rotas lá no final do arquivo ---
@@ -32,7 +36,7 @@ def obter_estado():
     return ESTADO_MEMORIA
 
 @app.post("/fila/entrar")
-def entrar_na_fila(requisicao: FilaEntrarRequest):
+def entrar_na_fila(requisicao: FilaAcaoRequest):
     jogador_id = requisicao.jogador_id
     
     # Regra de Negócio: Não deixa entrar duplicado
@@ -128,3 +132,90 @@ def alterar_status_jogador(jogador_id: str, status: schemas.JogadorStatusUpdate,
     db.commit()
     db.refresh(db_jogador)
     return db_jogador
+
+@app.post("/fila/sair")
+def sair_da_fila(requisicao: FilaAcaoRequest):
+    jogador_id = requisicao.jogador_id
+    
+    # Se o jogador estiver na fila, removemos
+    if jogador_id in ESTADO_MEMORIA["fila"]:
+        ESTADO_MEMORIA["fila"].remove(jogador_id)
+        
+    return {"mensagem": "Removido", "fila": ESTADO_MEMORIA["fila"]}
+
+@app.post("/fila/final")
+def mover_para_final(requisicao: FilaAcaoRequest):
+    jogador_id = requisicao.jogador_id
+    
+    if jogador_id in ESTADO_MEMORIA["fila"]:
+        ESTADO_MEMORIA["fila"].remove(jogador_id)
+        ESTADO_MEMORIA["fila"].append(jogador_id) # Coloca no fim da lista
+        
+    return {"mensagem": "Movido para o final", "fila": ESTADO_MEMORIA["fila"]}
+
+@app.post("/fila/embaralhar")
+def embaralhar_fila():
+    # random.shuffle altera a lista original diretamente na memória
+    random.shuffle(ESTADO_MEMORIA["fila"])
+    return {"mensagem": "Fila embaralhada", "fila": ESTADO_MEMORIA["fila"]}
+
+@app.post("/quadras/{quadra_id}/iniciar")
+def iniciar_partida(quadra_id: int, db: Session = Depends(get_db)):
+    if quadra_id not in [1, 2]:
+        raise HTTPException(status_code=400, detail="Quadra inválida.")
+        
+    jogo_atual = ESTADO_MEMORIA["jogos"].get(quadra_id)
+    if jogo_atual and jogo_atual.get("status") == "JOGANDO":
+        raise HTTPException(status_code=400, detail="Quadra já está em uso.")
+
+    # 1. Pega a configuração de Tamanho do Time (Padrão 4 se não existir)
+    config_tamanho = db.query(models.Configuracao).filter(models.Configuracao.chave == "TamanhoTime").first()
+    tamanho_time = config_tamanho.valor if config_tamanho else 4
+    necessarios = tamanho_time * 2
+
+    # 2. Verifica se tem gente suficiente
+    if len(ESTADO_MEMORIA["fila"]) < necessarios:
+        raise HTTPException(status_code=400, detail=f"Fila insuficiente. Necessários: {necessarios}.")
+
+    # 3. Separa os selecionados e atualiza a fila principal
+    selecionados_ids = ESTADO_MEMORIA["fila"][:necessarios]
+    ESTADO_MEMORIA["fila"] = ESTADO_MEMORIA["fila"][necessarios:]
+
+    # 4. Aleatoriza PRIMEIRO (A sua regra de quebrar panelinhas)
+    random.shuffle(selecionados_ids)
+
+    # 5. Busca no banco de dados o sexo de quem foi selecionado
+    jogadores_db = db.query(models.Jogador).filter(models.Jogador.id.in_(selecionados_ids)).all()
+    mapa_sexo = {j.id: j.sexo for j in jogadores_db}
+
+    mulheres = [jid for jid in selecionados_ids if mapa_sexo.get(jid) == 'F']
+    homens = [jid for jid in selecionados_ids if mapa_sexo.get(jid) != 'F'] # Trata 'M' ou nulo como masculino
+
+    time_a = []
+    time_b = []
+
+    # 6. Distribui as mulheres alternadamente
+    for i, f_id in enumerate(mulheres):
+        if i % 2 == 0:
+            time_a.append(f_id)
+        else:
+            time_b.append(f_id)
+            
+    # 7. Preenche as vagas restantes com os homens
+    for m_id in homens:
+        if len(time_a) < tamanho_time:
+            time_a.append(m_id)
+        else:
+            time_b.append(m_id)
+
+    # 8. Grava o novo estado da quadra na memória
+    ESTADO_MEMORIA["jogos"][quadra_id] = {
+        "status": "JOGANDO",
+        "inicio": datetime.now(timezone.utc).isoformat(),
+        "placar": {"A": 0, "B": 0},
+        "timeA": time_a,
+        "timeB": time_b,
+        "vitoriasConsecutivas": {"A": 0, "B": 0}
+    }
+
+    return {"mensagem": "Partida iniciada", "estado_quadra": ESTADO_MEMORIA["jogos"][quadra_id]}
