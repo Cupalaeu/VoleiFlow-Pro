@@ -4,11 +4,42 @@ from sqlalchemy.orm import Session
 import models
 from database import SessionLocal, engine
 import schemas
+from pydantic import BaseModel
 
 # Garante que as tabelas existam (útil caso o arquivo .db seja deletado acidentalmente)
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="VôleiFlow API", version="2.0")
+
+# A nossa variável global que todos os dispositivos vão enxergar
+ESTADO_MEMORIA = {
+    "fila": [], # Guardará apenas as strings dos IDs dos jogadores
+    "jogos": {
+        1: None,
+        2: None
+    }
+}
+
+# Molde simples para receber o ID de quem quer entrar na fila
+class FilaEntrarRequest(BaseModel):
+    jogador_id: str
+
+# --- Adicione estas rotas lá no final do arquivo ---
+
+@app.get("/estado")
+def obter_estado():
+    # Qualquer dispositivo pode bater aqui para saber como está a quadra agora
+    return ESTADO_MEMORIA
+
+@app.post("/fila/entrar")
+def entrar_na_fila(requisicao: FilaEntrarRequest):
+    jogador_id = requisicao.jogador_id
+    
+    # Regra de Negócio: Não deixa entrar duplicado
+    if jogador_id not in ESTADO_MEMORIA["fila"]:
+        ESTADO_MEMORIA["fila"].append(jogador_id)
+        
+    return {"mensagem": "Adicionado com sucesso", "fila": ESTADO_MEMORIA["fila"]}
 
 # Nossa função 'recepcionista' para gerenciar a sessão do banco
 def get_db():

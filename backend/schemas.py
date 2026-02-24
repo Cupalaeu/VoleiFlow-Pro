@@ -18,9 +18,9 @@ class ConfiguracaoResponse(ConfiguracaoBase):
 
 class JogadorBase(BaseModel):
     nome: str
-    whatsapp: str
     sexo: str
-    avatar: Optional[str] = None # Optional significa que pode vir vazio/nulo
+    whatsapp: Optional[str] = None
+    avatar: Optional[str] = None
 
 class JogadorCreate(JogadorBase):
     pass

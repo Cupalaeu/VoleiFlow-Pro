@@ -13,7 +13,7 @@ class Jogador(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid)
     nome = Column(String, index=True)
-    whatsapp = Column(String, unique=True, index=True)
+    whatsapp = Column(String, index=True, nullable=True)
     sexo = Column(String(1)) # 'M' ou 'F'
     avatar = Column(String)
     is_ativo = Column(Boolean, default=True)
