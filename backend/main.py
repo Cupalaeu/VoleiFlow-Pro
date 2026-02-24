@@ -1,5 +1,5 @@
 # backend/main.py
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 import models
 from database import SessionLocal, engine
@@ -66,3 +66,34 @@ def listar_jogadores_ativos(db: Session = Depends(get_db)):
     # Busca todos onde is_ativo é Verdadeiro
     jogadores = db.query(models.Jogador).filter(models.Jogador.is_ativo == True).all()
     return jogadores
+
+@app.put("/jogadores/{jogador_id}", response_model=schemas.JogadorResponse)
+def atualizar_jogador(jogador_id: str, atualizacao: schemas.JogadorUpdate, db: Session = Depends(get_db)):
+    db_jogador = db.query(models.Jogador).filter(models.Jogador.id == jogador_id).first()
+    if not db_jogador:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+    
+    # Extrai apenas os campos que o Front-end enviou na requisição
+    dados_atualizacao = atualizacao.model_dump(exclude_unset=True)
+    
+    # Atualiza dinamicamente o modelo do banco
+    for chave, valor in dados_atualizacao.items():
+        setattr(db_jogador, chave, valor)
+        
+    db.commit()
+    db.refresh(db_jogador)
+    return db_jogador
+
+@app.patch("/jogadores/{jogador_id}/status", response_model=schemas.JogadorResponse)
+def alterar_status_jogador(jogador_id: str, status: schemas.JogadorStatusUpdate, db: Session = Depends(get_db)):
+    db_jogador = db.query(models.Jogador).filter(models.Jogador.id == jogador_id).first()
+    if not db_jogador:
+        raise HTTPException(status_code=404, detail="Jogador não encontrado")
+    
+    dados_status = status.model_dump(exclude_unset=True)
+    for chave, valor in dados_status.items():
+        setattr(db_jogador, chave, valor)
+        
+    db.commit()
+    db.refresh(db_jogador)
+    return db_jogador

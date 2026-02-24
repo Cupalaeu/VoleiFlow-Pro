@@ -32,3 +32,13 @@ class JogadorResponse(JogadorBase):
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
+    
+class JogadorUpdate(BaseModel):
+    nome: Optional[str] = None
+    whatsapp: Optional[str] = None
+    sexo: Optional[str] = None
+    avatar: Optional[str] = None
+
+class JogadorStatusUpdate(BaseModel):
+    is_ativo: Optional[bool] = None
+    is_presente: Optional[bool] = None

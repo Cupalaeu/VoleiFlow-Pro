@@ -62,3 +62,21 @@ def test_listar_jogadores_ativos():
     assert isinstance(data, list) # Tem que ser uma lista
     assert len(data) > 0 # Como acabamos de criar o Robson no teste acima, não pode estar vazia
     assert data[0]["nome"] == "Robson"
+
+def test_atualizar_status_jogador():
+    # 1. Cria um jogador específico para testar o status
+    response_criacao = client.post("/jogadores", json={
+        "nome": "João do Teste",
+        "whatsapp": "85911112222", # Número diferente para não dar erro de "unique"
+        "sexo": "M",
+        "avatar": "👤"
+    })
+    
+    # Pegamos o ID real que o banco gerou
+    jogador_id = response_criacao.json()["id"]
+    
+    # 2. Testa o PATCH enviando apenas o comando para marcar presença
+    response_patch = client.patch(f"/jogadores/{jogador_id}/status", json={"is_presente": True})
+    
+    assert response_patch.status_code == 200
+    assert response_patch.json()["is_presente"] == True
