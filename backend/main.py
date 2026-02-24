@@ -219,3 +219,68 @@ def iniciar_partida(quadra_id: int, db: Session = Depends(get_db)):
     }
 
     return {"mensagem": "Partida iniciada", "estado_quadra": ESTADO_MEMORIA["jogos"][quadra_id]}
+
+# Molde para a requisição de alterar placar
+class PlacarRequest(BaseModel):
+    time: str # 'A' ou 'B'
+    delta: int # 1 para somar, -1 para subtrair
+
+@app.post("/quadras/{quadra_id}/placar")
+def atualizar_placar(quadra_id: int, requisicao: PlacarRequest):
+    jogo = ESTADO_MEMORIA["jogos"].get(quadra_id)
+    if not jogo or jogo["status"] != "JOGANDO":
+        raise HTTPException(status_code=400, detail="Nenhum jogo ativo nesta quadra.")
+    
+    time = requisicao.time.upper()
+    if time not in ["A", "B"]:
+        raise HTTPException(status_code=400, detail="Time inválido. Use 'A' ou 'B'.")
+        
+    novo_placar = jogo["placar"][time] + requisicao.delta
+    # Impede placar negativo
+    jogo["placar"][time] = max(0, novo_placar)
+    
+    return {"mensagem": "Placar atualizado", "placar": jogo["placar"]}
+
+@app.post("/quadras/{quadra_id}/encerrar")
+def encerrar_partida_manual(quadra_id: int, db: Session = Depends(get_db)):
+    jogo = ESTADO_MEMORIA["jogos"].get(quadra_id)
+    if not jogo or jogo["status"] != "JOGANDO":
+        raise HTTPException(status_code=400, detail="Nenhum jogo ativo nesta quadra.")
+        
+    # 1. Salva a Partida Principal no Banco
+    nova_partida = models.Partida(
+        quadra_id=quadra_id,
+        inicio=datetime.fromisoformat(jogo["inicio"]),
+        fim=datetime.now(timezone.utc),
+        placar_a=jogo["placar"]["A"],
+        placar_b=jogo["placar"]["B"],
+        vencedor=None, # Como foi manual, não tem vencedor formal
+        motivo_fim="Cancelada"
+    )
+    db.add(nova_partida)
+    db.commit()
+    db.refresh(nova_partida)
+    
+    # 2. Salva o Histórico de cada jogador no Banco (O seu registro atuarial)
+    todos_jogadores = []
+    
+    for j_id in jogo["timeA"]:
+        hist = models.PartidaHistorico(partida_id=nova_partida.id, jogador_id=j_id, time="A", resultado="Empate")
+        db.add(hist)
+        todos_jogadores.append(j_id)
+        
+    for j_id in jogo["timeB"]:
+        hist = models.PartidaHistorico(partida_id=nova_partida.id, jogador_id=j_id, time="B", resultado="Empate")
+        db.add(hist)
+        todos_jogadores.append(j_id)
+        
+    db.commit()
+    
+    # 3. Devolve a galera para a fila em ordem aleatória
+    random.shuffle(todos_jogadores)
+    ESTADO_MEMORIA["fila"].extend(todos_jogadores)
+    
+    # 4. Limpa a quadra
+    ESTADO_MEMORIA["jogos"][quadra_id] = None
+    
+    return {"mensagem": "Partida encerrada manualmente e salva no histórico.", "fila": ESTADO_MEMORIA["fila"]}

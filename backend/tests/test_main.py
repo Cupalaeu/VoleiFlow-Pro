@@ -1,6 +1,6 @@
 # backend/tests/test_main.py
 from fastapi.testclient import TestClient
-from main import app
+from main import app, ESTADO_MEMORIA
 
 client = TestClient(app)
 
@@ -80,3 +80,41 @@ def test_atualizar_status_jogador():
     
     assert response_patch.status_code == 200
     assert response_patch.json()["is_presente"] == True
+
+def test_atualizar_placar_e_encerrar():
+    # 0. SETUP: Configurar a quadra 1 artificialmente para isolar o teste
+    # Garantimos que, não importa o que aconteça, a quadra tem um jogo rodando
+    ESTADO_MEMORIA["jogos"][1] = {
+        "status": "JOGANDO",
+        "inicio": "2026-02-24T12:00:00Z",
+        "placar": {"A": 0, "B": 0},
+        "timeA": ["jogador_simulado_1", "jogador_simulado_2"],
+        "timeB": ["jogador_simulado_3", "jogador_simulado_4"],
+        "vitoriasConsecutivas": {"A": 0, "B": 0}
+    }
+    ESTADO_MEMORIA["fila"] = [] # Zeramos a fila temporariamente
+    fila_antes = 0
+
+    # 1. Testa Placar (Adiciona 1 ponto pro Time A, duas vezes)
+    client.post("/quadras/1/placar", json={"time": "A", "delta": 1})
+    resp_placar = client.post("/quadras/1/placar", json={"time": "A", "delta": 1})
+    
+    assert resp_placar.status_code == 200
+    assert resp_placar.json()["placar"]["A"] == 2
+    
+    # 2. Testa subtrair placar
+    client.post("/quadras/1/placar", json={"time": "A", "delta": -1})
+    estado_atual = client.get("/estado").json()
+    assert estado_atual["jogos"]["1"]["placar"]["A"] == 1
+    
+    # 3. Testa Encerramento Manual
+    resp_encerrar = client.post("/quadras/1/encerrar")
+    assert resp_encerrar.status_code == 200
+    
+    estado_final = client.get("/estado").json()
+    
+    # A quadra deve estar vazia
+    assert estado_final["jogos"]["1"] is None
+    
+    # A fila deve ter recebido as 4 pessoas que simulamos na quadra
+    assert len(estado_final["fila"]) == fila_antes + 4
