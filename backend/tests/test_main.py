@@ -116,3 +116,43 @@ def test_atualizar_placar_e_encerrar():
     
     # A fila deve ter recebido as 4 pessoas que simulamos na quadra
     assert len(estado_final["fila"]) == fila_antes + 4
+
+def test_registrar_vitoria_e_rotacao():
+    # 0. SETUP: Criamos uma quadra rodando (4v4)
+    ESTADO_MEMORIA["jogos"][1] = {
+        "status": "JOGANDO",
+        "inicio": "2026-02-24T12:00:00Z",
+        "placar": {"A": 20, "B": 18},
+        "timeA": ["v_1", "v_2", "v_3", "v_4"],
+        "timeB": ["p_1", "p_2", "p_3", "p_4"],
+        "vitoriasConsecutivas": {"A": 0, "B": 0}
+    }
+    # Fila tem 4 desafiantes esperando (Para bater com o TamanhoTime = 4 do Banco)
+    ESTADO_MEMORIA["fila"] = ["d_1", "d_2", "d_3", "d_4"] 
+    
+    # 1. Ação: Time A faz o último ponto e ganha
+    resp = client.post("/quadras/1/vitoria", json={
+        "time_vencedor": "A",
+        "placar_a": 21,
+        "placar_b": 18
+    })
+    
+    assert resp.status_code == 200
+    
+    # 2. Verificações do Estado da Quadra
+    estado = client.get("/estado").json()
+    jogo = estado["jogos"]["1"]
+    
+    # O jogo deve ter reiniciado
+    assert jogo["placar"]["A"] == 0
+    assert jogo["placar"]["B"] == 0
+    assert jogo["vitoriasConsecutivas"]["A"] == 1
+    
+    # Os perdedores saíram e os desafiantes entraram no Time B
+    assert "p_1" not in jogo["timeB"]
+    assert "d_1" in jogo["timeB"]
+    assert len(jogo["timeB"]) == 4
+    
+    # Os perdedores estão agora na fila principal
+    assert "p_1" in estado["fila"]
+    assert "p_4" in estado["fila"]

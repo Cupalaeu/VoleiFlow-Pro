@@ -8,6 +8,7 @@ from pydantic import BaseModel
 import random
 from datetime import datetime, timezone
 import random
+from typing import Optional
 
 # Garante que as tabelas existam (útil caso o arquivo .db seja deletado acidentalmente)
 models.Base.metadata.create_all(bind=engine)
@@ -284,3 +285,92 @@ def encerrar_partida_manual(quadra_id: int, db: Session = Depends(get_db)):
     ESTADO_MEMORIA["jogos"][quadra_id] = None
     
     return {"mensagem": "Partida encerrada manualmente e salva no histórico.", "fila": ESTADO_MEMORIA["fila"]}
+
+class VitoriaRequest(BaseModel):
+    time_vencedor: str # 'A' ou 'B'
+    placar_a: Optional[int] = None
+    placar_b: Optional[int] = None
+
+@app.post("/quadras/{quadra_id}/vitoria")
+def registrar_vitoria(quadra_id: int, req: VitoriaRequest, db: Session = Depends(get_db)):
+    jogo = ESTADO_MEMORIA["jogos"].get(quadra_id)
+    if not jogo or jogo["status"] != "JOGANDO":
+        raise HTTPException(status_code=400, detail="Nenhum jogo ativo nesta quadra.")
+
+    vencedor = req.time_vencedor.upper()
+    if vencedor not in ["A", "B"]:
+        raise HTTPException(status_code=400, detail="Vencedor inválido. Use 'A' ou 'B'.")
+        
+    perdedor = "B" if vencedor == "A" else "A"
+
+    # 1. Ajuste final de placar (se o Front enviou correção no modal)
+    if req.placar_a is not None: jogo["placar"]["A"] = req.placar_a
+    if req.placar_b is not None: jogo["placar"]["B"] = req.placar_b
+
+    # 2. Salva a Partida Principal no Banco
+    nova_partida = models.Partida(
+        quadra_id=quadra_id,
+        inicio=datetime.fromisoformat(jogo["inicio"]),
+        fim=datetime.now(timezone.utc),
+        placar_a=jogo["placar"]["A"],
+        placar_b=jogo["placar"]["B"],
+        vencedor=vencedor,
+        motivo_fim="Pontuacao"
+    )
+    db.add(nova_partida)
+    db.flush() # Envia pro banco para gerar o ID, mas não commita ainda
+
+    ids_vencedores = jogo[f"time{vencedor}"]
+    ids_perdedores = jogo[f"time{perdedor}"]
+
+    # 3. Salva o Histórico de cada jogador
+    for j_id in ids_vencedores:
+        db.add(models.PartidaHistorico(partida_id=nova_partida.id, jogador_id=j_id, time=vencedor, resultado="Vitoria"))
+    for j_id in ids_perdedores:
+        db.add(models.PartidaHistorico(partida_id=nova_partida.id, jogador_id=j_id, time=perdedor, resultado="Derrota"))
+    db.commit()
+
+    # 4. Rotaciona os Perdedores (Vão para a fila embaralhados)
+    perdedores_embaralhados = ids_perdedores.copy()
+    random.shuffle(perdedores_embaralhados)
+    ESTADO_MEMORIA["fila"].extend(perdedores_embaralhados)
+
+    # 5. Avalia o Limite de Vitórias
+    config_max = db.query(models.Configuracao).filter(models.Configuracao.chave == "MaxVitorias").first()
+    max_vitorias = config_max.valor if config_max else 3
+    
+    jogo["vitoriasConsecutivas"][vencedor] += 1
+    jogo["vitoriasConsecutivas"][perdedor] = 0 # Reseta o outro lado
+
+    if jogo["vitoriasConsecutivas"][vencedor] >= max_vitorias:
+        # Atingiu o limite: Vencedores também saem
+        vencedores_embaralhados = ids_vencedores.copy()
+        random.shuffle(vencedores_embaralhados)
+        ESTADO_MEMORIA["fila"].extend(vencedores_embaralhados)
+        
+        ESTADO_MEMORIA["jogos"][quadra_id] = None # Esvazia a quadra
+        msg = f"Limite de {max_vitorias} vitórias atingido. Todos para a fila."
+    else:
+        # Não atingiu o limite: Puxa desafiantes (O "Loop" perfeito dos 8 jogadores)
+        config_tamanho = db.query(models.Configuracao).filter(models.Configuracao.chave == "TamanhoTime").first()
+        tamanho_time = config_tamanho.valor if config_tamanho else 4
+
+        if len(ESTADO_MEMORIA["fila"]) >= tamanho_time:
+            novos_desafiantes = ESTADO_MEMORIA["fila"][:tamanho_time]
+            ESTADO_MEMORIA["fila"] = ESTADO_MEMORIA["fila"][tamanho_time:]
+            
+            # Substitui o time que perdeu
+            jogo[f"time{perdedor}"] = novos_desafiantes
+            # Reseta a quadra para a nova partida
+            jogo["placar"] = {"A": 0, "B": 0}
+            jogo["inicio"] = datetime.now(timezone.utc).isoformat()
+            msg = "Vitória registrada. Novos desafiantes entraram."
+        else:
+            # Regra de fallback (quase impossível de ocorrer devido ao loop, mas previne travamento do app)
+            vencedores_embaralhados = ids_vencedores.copy()
+            random.shuffle(vencedores_embaralhados)
+            ESTADO_MEMORIA["fila"].extend(vencedores_embaralhados)
+            ESTADO_MEMORIA["jogos"][quadra_id] = None
+            msg = "Fila insuficiente para continuar, quadra esvaziada."
+
+    return {"mensagem": msg, "estado_quadra": ESTADO_MEMORIA["jogos"].get(quadra_id)}
