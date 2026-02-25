@@ -3,15 +3,25 @@ import { defineStore } from 'pinia';
 import api from '../api';
 
 export const useVoleiStore = defineStore('volei', {
-  // 1. STATE: As variáveis globais (O antigo data() do Vue no GAS)
+  // 1. STATE: As variáveis globais
   state: () => ({
     statusSistema: 'Desconectado',
     loading: true,
     jogadores: [],
     filaIds: [],
     jogos: {},
-    config: {}
+    config: {},
+    // -- Variáveis de Interface (Novas) --
+    viewAtual: 'jogadores',
+    menuExpandido: false,
+    mobileMenuOpen: false,
   }),
+
+  // 1.5 GETTERS: Variáveis calculadas automaticamente (O antigo "computed")
+  getters: {
+    statusClass: (state) => state.statusSistema === 'Online' ? 'bg-green-500' : (state.statusSistema === 'Erro' ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'),
+    algumaQuadraAtiva: (state) => (state.jogos[1] && state.jogos[1].status === 'JOGANDO') || (state.jogos[2] && state.jogos[2].status === 'JOGANDO'),
+  },
 
   // 2. ACTIONS: As funções que alteram o state (Os antigos methods)
   actions: {
