@@ -5,26 +5,30 @@ from main import app, ESTADO_MEMORIA
 client = TestClient(app)
 
 def test_estado_inicial():
+    # SETUP: Força o estado a ficar limpo antes de testar
+    ESTADO_MEMORIA["fila"] = []
+    ESTADO_MEMORIA["jogos"] = {1: None, 2: None}
+    
     response = client.get("/estado")
     assert response.status_code == 200
     estado = response.json()
-    assert estado["fila"] == [] # Tem que começar vazia
-    assert estado["jogos"]["1"] is None # Quadra 1 vazia (no JSON, chaves viram strings)
+    assert estado["fila"] == [] 
+    assert estado["jogos"]["1"] is None 
 
 def test_entrar_na_fila():
-    # Simula o Robson clicando para entrar na fila
+    # SETUP: Zera a fila para garantir que a contagem vai ser exata
+    ESTADO_MEMORIA["fila"] = []
+    
     payload = {"jogador_id": "id-do-robson-123"}
     response = client.post("/fila/entrar", json=payload)
     
     assert response.status_code == 200
     assert "id-do-robson-123" in response.json()["fila"]
     
-    # Tenta entrar de novo para garantir que não duplica
     client.post("/fila/entrar", json=payload)
     
-    # Puxa o estado global para verificar
     estado_atual = client.get("/estado").json()
-    assert len(estado_atual["fila"]) == 1 # Tem que continuar sendo apenas 1
+    assert len(estado_atual["fila"]) == 1 # Agora sim, será sempre 1!
 
 def test_sair_da_fila():
     # 1. Injetamos um estado controlado na memória
