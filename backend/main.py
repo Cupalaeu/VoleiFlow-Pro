@@ -9,11 +9,22 @@ import random
 from datetime import datetime, timezone
 import random
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 # Garante que as tabelas existam (útil caso o arquivo .db seja deletado acidentalmente)
 models.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="VôleiFlow API", version="2.0")
+
+# --- ADICIONE ESTE BLOCO CORS ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Permite que qualquer porta (como a 5173 do Vue) faça requisições
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+# --------------------------------
 
 # A nossa variável global que todos os dispositivos vão enxergar
 ESTADO_MEMORIA = {
