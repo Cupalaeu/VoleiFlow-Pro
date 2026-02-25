@@ -374,3 +374,37 @@ def registrar_vitoria(quadra_id: int, req: VitoriaRequest, db: Session = Depends
             msg = "Fila insuficiente para continuar, quadra esvaziada."
 
     return {"mensagem": msg, "estado_quadra": ESTADO_MEMORIA["jogos"].get(quadra_id)}
+
+class SubstituicaoRequest(BaseModel):
+    id_saindo: str
+    id_entrando: str
+
+@app.post("/quadras/{quadra_id}/substituir")
+def substituir_jogador(quadra_id: int, req: SubstituicaoRequest):
+    jogo = ESTADO_MEMORIA["jogos"].get(quadra_id)
+    
+    # 1. Validações Iniciais
+    if not jogo or jogo["status"] != "JOGANDO":
+        raise HTTPException(status_code=400, detail="Nenhum jogo ativo nesta quadra.")
+        
+    if req.id_entrando not in ESTADO_MEMORIA["fila"]:
+        raise HTTPException(status_code=400, detail="O jogador substituto não está na fila de espera.")
+
+    # 2. Descobre em qual time o jogador que vai sair está
+    time_alvo = None
+    if req.id_saindo in jogo["timeA"]:
+        time_alvo = "timeA"
+    elif req.id_saindo in jogo["timeB"]:
+        time_alvo = "timeB"
+    else:
+        raise HTTPException(status_code=400, detail="O jogador que vai sair não está na quadra.")
+
+    # 3. Faz a troca no time (Sai um, Entra o outro)
+    jogo[time_alvo].remove(req.id_saindo)
+    jogo[time_alvo].append(req.id_entrando)
+
+    # 4. Atualiza a fila (Remove o substituto e joga quem saiu pro final)
+    ESTADO_MEMORIA["fila"].remove(req.id_entrando)
+    ESTADO_MEMORIA["fila"].append(req.id_saindo)
+
+    return {"mensagem": "Substituição realizada com sucesso", "estado_quadra": jogo}

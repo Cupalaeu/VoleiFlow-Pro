@@ -156,3 +156,36 @@ def test_registrar_vitoria_e_rotacao():
     # Os perdedores estão agora na fila principal
     assert "p_1" in estado["fila"]
     assert "p_4" in estado["fila"]
+
+def test_substituir_jogador():
+    # 0. SETUP: Criamos uma quadra rodando e uma fila com substitutos
+    ESTADO_MEMORIA["jogos"][1] = {
+        "status": "JOGANDO",
+        "inicio": "2026-02-25T12:00:00Z",
+        "placar": {"A": 10, "B": 10},
+        "timeA": ["jogador_a1", "jogador_a2", "jogador_a3", "jogador_cansado"],
+        "timeB": ["jogador_b1", "jogador_b2", "jogador_b3", "jogador_b4"],
+        "vitoriasConsecutivas": {"A": 0, "B": 0}
+    }
+    ESTADO_MEMORIA["fila"] = ["substituto_novo", "outro_esperando"]
+    
+    # 1. Ação: Substituir o jogador_cansado pelo substituto_novo
+    resp = client.post("/quadras/1/substituir", json={
+        "id_saindo": "jogador_cansado",
+        "id_entrando": "substituto_novo"
+    })
+    
+    assert resp.status_code == 200
+    
+    # 2. Verificações do Estado
+    estado = client.get("/estado").json()
+    jogo = estado["jogos"]["1"]
+    fila = estado["fila"]
+    
+    # O jogador cansado saiu e o novo entrou no Time A
+    assert "jogador_cansado" not in jogo["timeA"]
+    assert "substituto_novo" in jogo["timeA"]
+    
+    # A fila foi atualizada corretamente
+    assert "substituto_novo" not in fila
+    assert fila[-1] == "jogador_cansado" # Foi para o final da fila
